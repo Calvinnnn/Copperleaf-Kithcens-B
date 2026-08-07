@@ -148,12 +148,18 @@ class SemanticConsolidationEngine:
     ) -> ConsolidationResult:
         """Run consolidation batch over unprocessed episodic events.
 
+        Step 0 automatically expires any active semantic facts whose
+        valid_until timestamp has lapsed before processing new events.
+
         Args:
             batch_size: Optional limit on the number of episodic events to process.
 
         Returns:
             ConsolidationResult containing stats and change logs.
         """
+        # Step 0: Expire stale facts before extracting new knowledge
+        self._expire_stale_facts()
+
         unprocessed = self._episodic_memory.get_unconsolidated_events(
             limit=batch_size
         )
@@ -178,6 +184,29 @@ class SemanticConsolidationEngine:
 
         self._history_runs.append(result)
         return result
+
+    def _expire_stale_facts(self) -> int:
+        """Expire active semantic facts whose valid_until TTL has passed.
+
+        Called at the start of every consolidation run. Compares each active
+        fact's valid_until field against the current UTC timestamp and calls
+        mark_expired() on any fact that has lapsed.
+
+        Returns:
+            Number of facts expired during this pass.
+        """
+        now_str = datetime.now(timezone.utc).isoformat()
+        expired_count = 0
+        for fact in self._semantic_memory.get_all_active_facts():
+            if fact.valid_until is not None and fact.valid_until < now_str:
+                fact.mark_expired(
+                    reason=(
+                        f"TTL expired during consolidation pass: "
+                        f"valid_until={fact.valid_until}, now={now_str}"
+                    )
+                )
+                expired_count += 1
+        return expired_count
 
     def consolidate_event(
         self, event: EpisodicMemoryItem
