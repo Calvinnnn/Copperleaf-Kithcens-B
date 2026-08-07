@@ -433,3 +433,5 @@ __pycache__/
 .env
 .venv/
 venv/
+
+rag/chroma_db/
