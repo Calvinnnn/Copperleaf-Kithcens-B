@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, List, Optional
 
-from context_eval.masking import ObservationMaskingStrategy
+from context_eval.masking import ObservationMaskingStrategy, PIIMaskingStrategy
 from context_eval.sliding_window import (
     BaseContextStrategy,
     ContextWindowMetrics,
@@ -133,6 +133,7 @@ class ContextEvaluationRunner:
         self._strategies: List[BaseContextStrategy] = [
             SlidingWindowStrategy(default_turn_window=8),
             ObservationMaskingStrategy(preserve_recent_count=1),
+            PIIMaskingStrategy(),
             RecursiveSummarizationStrategy(recent_turns_verbatim=4),
             ZoneBasedPruningStrategy(recent_zone_turns=3),
         ]
