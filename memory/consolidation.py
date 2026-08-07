@@ -237,15 +237,16 @@ class SemanticConsolidationEngine:
                 if k not in ("subject", "entity", "full_content", "routing_reason", "item_id"):
                     triples.append((str(subject), str(k), v))
 
-        # 2. Extract from natural language summary via RegEx pattern matching
-        summary = event.summary
-        for pattern in self.PATTERNS:
-            match = pattern.search(summary)
-            if match:
-                pred, val = match.group(1).strip(), match.group(2).strip()
-                triples.append(("agent_config", pred.lower(), val))
+        # 2. Extract from natural language summary via RegEx pattern matching if no structured triples were found
+        if not triples:
+            summary = event.summary
+            for pattern in self.PATTERNS:
+                match = pattern.search(summary)
+                if match:
+                    pred, val = match.group(1).strip(), match.group(2).strip()
+                    triples.append(("agent_config", pred.lower(), val))
 
-        # 3. Fallback: if no pattern matched, convert summary to a generic fact
+        # 3. Fallback: if still no triples found, convert summary to a generic fact
         if not triples:
             subj = str(event.event_type)
             triples.append((subj, "summary", event.summary))
@@ -302,7 +303,7 @@ class SemanticConsolidationEngine:
             # Newer episode supersedes old value; old value preserved in fact history
             existing_fact.update_value(
                 new_value=value,
-                reason=f"Consolidation superseded value from event {event_id}",
+                reason=f"SUPERSEDED: Consolidation superseded value from event {event_id}",
                 new_source_event_ids=[event_id],
             )
             return ConsolidationLogEntry(
