@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any, List, Optional, Self
 import uuid
 
+try:
+    from memory import db_backend as _db
+    _DB_AVAILABLE = True
+except Exception:
+    _DB_AVAILABLE = False
+
 
 class EventType(StrEnum):
     """Categorized types of episodic events."""
@@ -166,6 +172,21 @@ class EpisodicMemory:
             metadata=metadata or {},
         )
         self._events[item.event_id] = item
+        # Persist to SQLite so event survives process restarts
+        if _DB_AVAILABLE:
+            try:
+                _db.ep_insert(
+                    event_id=item.event_id,
+                    event_type=str(item.event_type),
+                    summary=item.summary,
+                    details=item.details,
+                    importance_score=item.importance_score,
+                    tags=item.tags,
+                    source=item.source,
+                    metadata=item.metadata,
+                )
+            except Exception:
+                pass  # SQLite failure must not crash the agent
         self._auto_save()
         return item
 
@@ -233,7 +254,7 @@ class EpisodicMemory:
         return self.query(is_consolidated=False, limit=limit)
 
     def mark_consolidated(self, event_ids: List[str]) -> int:
-        """Flag specified events as consolidated.
+        """Flag specified events as consolidated and sync to SQLite.
 
         Args:
             event_ids: List of event IDs to mark.
@@ -247,13 +268,23 @@ class EpisodicMemory:
                 self._events[eid].mark_consolidated()
                 count += 1
         if count > 0:
+            if _DB_AVAILABLE:
+                try:
+                    _db.ep_mark_consolidated(event_ids)
+                except Exception:
+                    pass
             self._auto_save()
         return count
 
     def delete_event(self, event_id: str) -> bool:
-        """Remove an event record by ID."""
+        """Remove an event record by ID from memory and SQLite."""
         if event_id in self._events:
             del self._events[event_id]
+            if _DB_AVAILABLE:
+                try:
+                    _db.ep_delete(event_id)
+                except Exception:
+                    pass
             self._auto_save()
             return True
         return False
