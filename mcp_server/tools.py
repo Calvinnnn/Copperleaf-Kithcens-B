@@ -175,11 +175,20 @@ def write_off_inventory(session: Session, item_id: int, quantity: float, reason:
             "WHERE item_id = ?",
             (quantity, item_id),
         )
+        # Re-read the committed quantity inside the same connection/transaction
+        # so the response reflects the actual post-write DB state, not the
+        # pre-write snapshot (which would be wrong under concurrent writes).
+        new_qty_row = conn.execute(
+            "SELECT current_quantity FROM inventory_items WHERE item_id = ?",
+            (item_id,),
+        ).fetchone()
+
+    new_stock_level = new_qty_row["current_quantity"] if new_qty_row else (item["current_quantity"] - quantity)
 
     return {
         "item_id": item_id,
         "quantity_written_off": quantity,
         "reason": reason,
-        "new_stock_level": item["current_quantity"] - quantity,
+        "new_stock_level": new_stock_level,
         "recorded_by": session.full_name,
     }

@@ -131,8 +131,30 @@ def supplier_order_inquiry(order_id: int) -> str:
 @mcp.tool()
 async def elevate_to_manager(ctx: Context, manager_passcode: str) -> dict:
     """Elevate the current session role from staff to manager at runtime.
-    Pushes tools/list_changed notification to connected client when successful."""
+    Pushes tools/list_changed notification to connected client when successful.
+
+    CRITICAL: This tool mutates the module-level SESSION global. Under stdio
+    transport (one process = one client) this is safe. Under SSE transport
+    (multiple concurrent clients sharing one process) it is NOT safe — the
+    global would be shared across all sessions. The tool is therefore blocked
+    under SSE until per-request session resolution is implemented (see auth.py
+    TODO and the README transport section).
+    """
     global SESSION
+
+    # Guard: SSE transport shares one process across multiple clients.
+    # Mutating a module-level SESSION global under SSE would corrupt other
+    # sessions. Block this tool until per-request auth is wired up.
+    transport = os.environ.get("COPPERLEAF_TRANSPORT", "stdio")
+    if transport == "sse":
+        return _as_error(
+            AuthorizationError(
+                "elevate_to_manager is not available under SSE transport because "
+                "a single process serves multiple concurrent sessions. "
+                "Implement per-request session resolution before enabling this."
+            )
+        )
+
     if manager_passcode != "MGR2026":
         return _as_error(AuthorizationError("Invalid manager passcode."))
 
@@ -222,14 +244,20 @@ async def write_off_inventory(ctx: Context, item_id: int, quantity: float, reaso
     spoiled_before_use, past_expiry, damaged_in_delivery, prep_error, other.
     Triggers mid-call human elicitation if total cost >= $100 or item unit cost >= $50."""
     try:
-        # Fetch item details first for elicitation risk evaluation
+        # Fetch item details first for elicitation risk evaluation.
+        # If the item does not exist, return a structured error immediately
+        # rather than letting the elicitation gate silently skip and delegating
+        # to _tools where the error surface is less clear.
         with get_connection() as conn:
             item = conn.execute(
                 "SELECT item_id, branch_id, current_quantity, unit_cost, name FROM inventory_items WHERE item_id = ?",
                 (item_id,),
             ).fetchone()
 
-        if item and requires_elicitation(quantity, item["unit_cost"]):
+        if item is None:
+            return _as_error(ToolError(f"No inventory item with item_id={item_id}."))
+
+        if requires_elicitation(quantity, item["unit_cost"]):
             # Check client capability negotiation before attempting elicitation
             supports_elicitation = ctx.session.check_client_capability(
                 ClientCapabilities(elicitation=ElicitationCapability())
@@ -287,6 +315,12 @@ async def write_off_inventory(ctx: Context, item_id: int, quantity: float, reaso
 
         return _tools.write_off_inventory(SESSION, item_id, quantity, reason)
     except (AuthorizationError, ToolError, ValidationError) as e:
+        return _as_error(e)
+    except Exception as e:  # noqa: BLE001
+        # Catch unexpected exceptions (sqlite3.OperationalError, MCP runtime
+        # errors, future Memory subsystem exceptions, etc.) so the tool call
+        # always returns a structured error rather than an unhandled traceback.
+        print(f"[copperleaf] Unexpected error in write_off_inventory: {e!r}", file=sys.stderr)
         return _as_error(e)
 
 
@@ -393,8 +427,22 @@ _ALL_TOOL_NAMES = (
 
 
 def _harden_tool_schemas() -> None:
+    # NOTE: _tool_manager is a private FastMCP attribute. There is no public
+    # API for post-registration schema mutation in mcp 1.x. If the MCP library
+    # is upgraded and this attribute is renamed (as happened in mcp 2.x), the
+    # function degrades gracefully with a warning rather than crashing startup.
+    tool_manager = getattr(mcp, "_tool_manager", None)
+    if tool_manager is None:
+        print(
+            "[copperleaf] WARNING: mcp._tool_manager not found — schema hardening "
+            "(enum constraints, additionalProperties: false) was NOT applied. "
+            "Check if the mcp library was upgraded beyond 1.x.",
+            file=sys.stderr,
+        )
+        return
+
     for tool_name, field_enums in _ENUM_CONSTRAINTS.items():
-        tool = mcp._tool_manager.get_tool(tool_name)
+        tool = tool_manager.get_tool(tool_name)
         if tool is None:
             continue
         for field, enum_values in field_enums.items():
@@ -402,12 +450,19 @@ def _harden_tool_schemas() -> None:
                 tool.parameters["properties"][field]["enum"] = enum_values
 
     for tool_name in _ALL_TOOL_NAMES:
-        tool = mcp._tool_manager.get_tool(tool_name)
+        tool = tool_manager.get_tool(tool_name)
         if tool is not None:
             tool.parameters["additionalProperties"] = False
 
 
-_harden_tool_schemas()
+try:
+    _harden_tool_schemas()
+except Exception as e:  # noqa: BLE001
+    print(
+        f"[copperleaf] WARNING: _harden_tool_schemas() raised an unexpected error: {e!r}. "
+        "Schema hardening was NOT fully applied — review before production use.",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -435,6 +490,8 @@ if __name__ == "__main__":
             f"[copperleaf] Starting Streamable HTTP / SSE server on port {args.port}...",
             file=sys.stderr,
         )
+        os.environ["COPPERLEAF_TRANSPORT"] = "sse"
         mcp.run(transport="sse", port=args.port)
     else:
+        os.environ["COPPERLEAF_TRANSPORT"] = "stdio"
         mcp.run(transport="stdio")
