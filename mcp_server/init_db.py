@@ -16,6 +16,7 @@ DB_DIR = Path(__file__).resolve().parent.parent / "db"
 DB_PATH = DB_DIR / "copperleaf.db"
 SCHEMA_PATH = DB_DIR / "schema.sql"
 SEED_PATH = DB_DIR / "seed.sql"
+MEMORY_MIGRATE_PATH = DB_DIR / "migrate_memory.sql"
 
 
 def build():
@@ -28,8 +29,11 @@ def build():
     try:
         conn.executescript(SCHEMA_PATH.read_text())
         conn.executescript(SEED_PATH.read_text())
+        if MEMORY_MIGRATE_PATH.exists():
+            conn.executescript(MEMORY_MIGRATE_PATH.read_text())
+            print(f"Applied memory migration from {MEMORY_MIGRATE_PATH.name}")
         conn.commit()
-        print(f"Built {DB_PATH} from schema.sql + seed.sql")
+        print(f"Built {DB_PATH} from schema.sql + seed.sql + migrate_memory.sql")
     finally:
         conn.close()
 

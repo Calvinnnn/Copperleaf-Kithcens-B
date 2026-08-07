@@ -15,9 +15,14 @@ passing the current session in when it wires these up.
 """
 from typing import Optional
 
-from auth import Session
-from db import get_connection, get_write_connection
-from validation import ValidationError, validate_date_range, validate_write_off
+try:
+    from mcp_server.auth import Session
+    from mcp_server.db import get_connection, get_write_connection
+    from mcp_server.validation import ValidationError, validate_date_range, validate_write_off
+except ImportError:
+    from auth import Session
+    from db import get_connection, get_write_connection
+    from validation import ValidationError, validate_date_range, validate_write_off
 
 
 class ToolError(Exception):

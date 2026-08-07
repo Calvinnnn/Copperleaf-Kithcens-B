@@ -21,6 +21,15 @@ import argparse
 import os
 import sys
 
+from pathlib import Path
+
+_SERVER_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SERVER_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(_SERVER_DIR))
+
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.elicitation import elicit_with_validation
 from mcp.types import (
@@ -32,11 +41,18 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field
 
-from auth import AuthError, Session, resolve_staff
-from db import get_connection
-from validation import ValidationError, requires_elicitation, validate_date_range
-import tools as _tools
-from tools import AuthorizationError, ToolError
+try:
+    from mcp_server.auth import AuthError, Session, resolve_staff
+    from mcp_server.db import get_connection
+    from mcp_server.validation import ValidationError, requires_elicitation, validate_date_range
+    import mcp_server.tools as _tools
+    from mcp_server.tools import AuthorizationError, ToolError
+except ImportError:
+    from auth import AuthError, Session, resolve_staff
+    from db import get_connection
+    from validation import ValidationError, requires_elicitation, validate_date_range
+    import tools as _tools
+    from tools import AuthorizationError, ToolError
 
 mcp = FastMCP(
     "copperleaf-kitchens",
