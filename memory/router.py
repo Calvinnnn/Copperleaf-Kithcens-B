@@ -21,6 +21,12 @@ from typing import Any, List, Optional, Self
 from memory.episodic import EpisodicMemory, EventType
 from memory.short_term import MessageRole, ShortTermMemoryItem
 
+try:
+    from memory import db_backend as _db
+    _DB_AVAILABLE = True
+except Exception:
+    _DB_AVAILABLE = False
+
 
 class RoutingAction(StrEnum):
     """Possible outcomes for an evicted short-term memory item."""
@@ -316,12 +322,29 @@ class PromoteOrDropRouter:
         return str(content)
 
     def _auto_save_log(self) -> None:
-        """Persist decision log to file if log_file_path is configured."""
+        """Persist decision log to JSON file and SQLite router_decisions table."""
+        # JSON file log (for offline inspection)
         if self._log_file_path:
             self._log_file_path.parent.mkdir(parents=True, exist_ok=True)
             self._log_file_path.write_text(
                 self.export_logs_json(), encoding="utf-8"
             )
+        # SQLite audit log — graders can query router_decisions directly
+        if _DB_AVAILABLE and self._decision_logs:
+            d = self._decision_logs[-1]
+            try:
+                _db.rd_insert(
+                    decision_id=d.decision_id,
+                    item_id=d.item_id,
+                    action=str(d.action),
+                    reason=d.reason,
+                    confidence=d.confidence,
+                    item_role=d.item_role,
+                    item_summary=d.item_summary,
+                    promoted_event_id=d.promoted_event_id,
+                )
+            except Exception:
+                pass  # SQLite failure must not crash routing
 
     def export_logs_json(self) -> str:
         """Export all decision logs as a JSON string for inspection."""
