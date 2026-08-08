@@ -12,6 +12,19 @@ of the memory subsystem as required by the Copperleaf Kitchens Architecture:
 
 from typing import Any, Dict, List, Optional
 
+# ---------------------------------------------------------------------
+# MCP Server Integration
+# This agent is built ON TOP of the existing mcp_server/ and db/ from
+# the MCP Server Lab. The MCP tools (inventory, waste reports, supplier
+# orders) are called through the MultiServerMCPClient defined in
+# agent/client.py. Memory and RAG are extensions - not replacements.
+# ---------------------------------------------------------------------
+try:
+    from agent.client import create_mcp_client  # wraps mcp_server/server.py
+    _MCP_AVAILABLE = True
+except ImportError:
+    _MCP_AVAILABLE = False  # Graceful fallback for offline / unit-test runs
+
 from memory.consolidation import SemanticConsolidationEngine
 from memory.episodic import EpisodicMemory
 from memory.router import PromoteOrDropRouter
